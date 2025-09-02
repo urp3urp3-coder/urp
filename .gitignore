@@ -1,0 +1,21 @@
+# Python / venv
+__pycache__/
+*.pyc
+.venv/
+
+# VS Code
+.vscode/
+
+# Outputs
+roi_out/
+
+# Datasets & big files
+Conjunctival Images for Anemia Detection/
+India.xlsx
+Italy.xlsx
+Dataset anemia.docx
+
+# (선택) 루트에 있는 개별 이미지도 올리지 않으려면 아래 유지
+*.png
+*.jpg
+*.jpeg
