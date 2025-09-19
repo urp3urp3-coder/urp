@@ -12,9 +12,11 @@ def find_full_path(row, data_root, label2class):
     if class_folder is None:
         return None
     
-    file_name = row.get('UNAS')
-    if not isinstance(file_name, str):
+    # Use 'ID' column and append '.jpg' as discovered
+    file_id = row.get('ID')
+    if not isinstance(file_id, str):
         return None
+    file_name = f"{file_id}.jpg"
 
     for split_folder in possible_splits:
         path_to_check = os.path.join(data_root, split_folder, class_folder, file_name)
@@ -26,7 +28,7 @@ def find_full_path(row, data_root, label2class):
 class UnaDataset(HugFewShotDataset):
     def __init__(self, split="train", *args, **kwargs):
         # FIX 1: Corrected data path
-        self.data_root = "../../../9월 3주차/una-001-output"
+        self.data_root = "C:/Users/parkj/OneDrive - 성균관대학교/바탕 화면/urp/augmentation/urp/seyun/Diff-Mix/una-001-output"
         super().__init__(split=split, *args, **kwargs)
         
         self.split = split
