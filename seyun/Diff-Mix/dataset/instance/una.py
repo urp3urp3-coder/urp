@@ -28,7 +28,7 @@ def find_full_path(row, data_root, label2class):
 class UnaDataset(HugFewShotDataset):
     def __init__(self, split="train", *args, **kwargs):
         # FIX 1: Corrected data path
-        self.data_root = "C:/Users/parkj/OneDrive - 성균관대학교/바탕 화면/urp/augmentation/urp/seyun/Diff-Mix/una-001-output"
+        self.data_root = "una-001-output"
         super().__init__(split=split, *args, **kwargs)
         
         self.split = split
