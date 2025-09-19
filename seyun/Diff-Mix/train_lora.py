@@ -689,9 +689,9 @@ def main():
             hidden_size = unet.config.block_out_channels[block_id]
 
         lora_attn_procs[name] = LoRAAttnProcessor(
-            hidden_size=hidden_size,
-            cross_attention_dim=cross_attention_dim,
-            rank=args.rank,
+            #hidden_size=hidden_size,
+            #cross_attention_dim=cross_attention_dim,
+            #rank=args.rank,
         )
 
     unet.set_attn_processor(lora_attn_procs)
@@ -739,7 +739,8 @@ def main():
         snr = (alpha / sigma) ** 2
         return snr
 
-    lora_layers = AttnProcsLayers(unet.attn_processors)
+    # lora_layers = AttnProcsLayers(unet.attn_processors)
+    params_to_train = filter(lambda p: p.requires_grad, unet.parameters())
 
     # Enable TF32 for faster training on Ampere GPUs,
     # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
@@ -770,7 +771,7 @@ def main():
     optimizer = optimizer_cls(
         [
             {
-                "params": lora_layers.parameters(),
+                "params": params_to_train,
                 "lr": args.learning_rate if not args.ti_only else 0,
             },
             {
@@ -858,9 +859,9 @@ def main():
     )
 
     # Prepare everything with our `accelerator`.
-    lora_layers, text_encoder, optimizer, train_dataloader, lr_scheduler = (
+    unet, text_encoder, optimizer, train_dataloader, lr_scheduler = (
         accelerator.prepare(
-            lora_layers, text_encoder, optimizer, train_dataloader, lr_scheduler
+            unet, text_encoder, optimizer, train_dataloader, lr_scheduler
         )
     )
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
@@ -1042,7 +1043,7 @@ def main():
                 # Backpropagate
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
-                    params_to_clip = lora_layers.parameters()
+                    params_to_clip = params_to_train
                     accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
                 optimizer.step()
                 lr_scheduler.step()
