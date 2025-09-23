@@ -7,23 +7,47 @@ from PIL import Image
 from torchvision import transforms
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
 
 class HbRegressionDataset(Dataset):
     def __init__(self, csv_file, img_dir, transform=None):
-        self.metadata = pd.read_csv(csv_file)
         self.img_dir = img_dir
         self.transform = transform
+        
+        all_metadata = pd.read_csv(csv_file)
+        
+        valid_indices = []
+        image_paths = []
+        print(f"Verifying dataset for split: '{os.path.basename(img_dir)}'... This might take a moment.")
+        for idx, row in all_metadata.iterrows():
+            img_name = row['ID']
+            img_path = self._find_img_path(self.img_dir, str(img_name))
+            if img_path:
+                valid_indices.append(idx)
+                image_paths.append(img_path)
+
+        self.metadata = all_metadata.loc[valid_indices].reset_index(drop=True)
+        self.metadata['image_path'] = image_paths
+        
+        print(f"Dataset for '{os.path.basename(img_dir)}' ready. Found {len(self.metadata)} valid image entries.")
 
     def __len__(self):
         return len(self.metadata)
 
-    def __getitem__(self, idx):
-        img_name = self.metadata.loc[idx, 'ID']
-        hb_value = self.metadata.loc[idx, 'Hemoglobina']
+    def _find_img_path(self, root, img_name):
+        for dirpath, _, filenames in os.walk(root):
+            for filename in filenames:
+                name_part, _ = os.path.splitext(filename)
+                if name_part == img_name:
+                    return os.path.join(dirpath, filename)
+                if filename == img_name:
+                    return os.path.join(dirpath, filename)
+        return None
 
-        img_path = self.find_img_path(self.img_dir, img_name)
-        if img_path is None:
-            raise FileNotFoundError(f"Image '{img_name}' not found in '{self.img_dir}'")
+    def __getitem__(self, idx):
+        img_path = self.metadata.loc[idx, 'image_path']
+        hb_value = self.metadata.loc[idx, 'Hemoglobina']
+        
         image = Image.open(img_path).convert('RGB')
 
         if self.transform:
@@ -32,62 +56,111 @@ class HbRegressionDataset(Dataset):
         hb_value = torch.tensor(hb_value, dtype=torch.float32)
 
         return image, hb_value
+
+def evaluate(model, dataloader, criterion_mse, criterion_mae, device, accuracy_tolerance=1.0):
+    model.eval()
+    all_outputs = []
+    all_labels = []
+
+    with torch.no_grad():
+        for images, labels in dataloader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images).squeeze(1)
+            all_outputs.append(outputs)
+            all_labels.append(labels)
+
+    # Concatenate lists of tensors into single tensors
+    all_outputs = torch.cat(all_outputs)
+    all_labels = torch.cat(all_labels)
+
+    # Calculate all metrics on the full validation/test set
+    mse_loss = criterion_mse(all_outputs, all_labels).item()
+    mae = criterion_mae(all_outputs, all_labels).item()
     
-    def find_img_path(self, root, img_name):
-        for dirpath, _, filenames in os.walk(root):
-            if img_name in filenames:
-                return os.path.join(dirpath, img_name)
-        return None
+    # Accuracy calculation
+    total_samples = len(all_labels)
+    correct_predictions = (torch.abs(all_outputs - all_labels) < accuracy_tolerance).sum().item()
+    accuracy = (correct_predictions / total_samples) * 100
 
-# 최종 실험 때는 경로 수정해야 함. 
-# csv_file: seyun\Diff-Mix\una-001-output\metadata.csv
-# img_dir: seyun\Diff-Mix\una-001-output\train
+    # R-squared (R²) calculation
+    ss_tot = torch.sum((all_labels - torch.mean(all_labels)) ** 2)
+    ss_res = torch.sum((all_labels - all_outputs) ** 2)
+    r2_score = (1 - ss_res / ss_tot).item()
 
-# 전처리는 timm의 swin_tiny_patch4_window7_224 모델에 맞춰야 함!!!!!!!! 
-data_config = timm.data.resolve_data_config({}, model='swin_tiny_patch4_window7_224')
-transform = timm.data.create_transform(**data_config)
+    return mse_loss, mae, accuracy, r2_score
 
-ROOT_DATA_DIR = 'seyun/Diff-Mix/una-001-output/'
-CSV_FILE_PATH = os.path.join(ROOT_DATA_DIR, 'metadata.csv')
-dataset = HbRegressionDataset(csv_file=CSV_FILE_PATH, img_dir=ROOT_DATA_DIR, transform=transform)
-# NOTE: num_workers > 0 can cause issues on Windows. Set to 0 for debugging, especially on different hardware.
-dataloader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=0)
+# --- Main Execution ---
+if __name__ == '__main__':
+    # 1. Setup
+    writer = SummaryWriter('runs/hb_predictor_experiment')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
 
-# Swin Transformer
-model = timm.create_model(
-    'swin_tiny_patch4_window7_224',
-    pretrained=True,
-    num_classes=1 
-)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model.to(device)
+    # 2. Paths and Transformations
+    ROOT_DATA_DIR = 'seyun/Diff-Mix/una-001-output/'
+    CSV_FILE_PATH = os.path.join(ROOT_DATA_DIR, 'metadata.csv')
+    data_config = timm.data.resolve_data_config({}, model='swin_tiny_patch4_window7_224')
+    transform = timm.data.create_transform(**data_config)
 
-# 일단 가장 기본적인 걸로 (실험하면서 바꿀 예정)
-criterion = nn.MSELoss()
-optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-5)
-num_epochs = 10
+    # 3. Data Loading
+    train_dataset = HbRegressionDataset(csv_file=CSV_FILE_PATH, img_dir=os.path.join(ROOT_DATA_DIR, 'train'), transform=transform)
+    val_dataset = HbRegressionDataset(csv_file=CSV_FILE_PATH, img_dir=os.path.join(ROOT_DATA_DIR, 'validation'), transform=transform)
+    test_dataset = HbRegressionDataset(csv_file=CSV_FILE_PATH, img_dir=os.path.join(ROOT_DATA_DIR, 'test'), transform=transform)
 
-model.train()
+    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=0)
+    test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=0)
 
-for epoch in range(num_epochs):
-    running_loss = 0.0
-    for i, (images, labels) in enumerate(dataloader):
-        images = images.to(device)
-        labels = labels.to(device)
+    # 4. Model, Loss, Optimizer
+    model = timm.create_model('swin_tiny_patch4_window7_224', pretrained=True, num_classes=1)
+    model.to(device)
 
-        optimizer.zero_grad()
+    criterion_mse = nn.MSELoss()
+    criterion_mae = nn.L1Loss()
+    optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-5)
+    num_epochs = 10
 
-        outputs = model(images)
-        # Squeeze model output to match label shape (B, 1) -> (B)
-        loss = criterion(outputs.squeeze(1), labels)
-        loss.backward()
-        optimizer.step()
+    # 5. Training & Validation Loop
+    best_val_loss = float('inf')
+    print("\n--- Starting Training ---")
+    for epoch in range(num_epochs):
+        model.train()
+        running_loss = 0.0
+        for i, (images, labels) in enumerate(train_loader):
+            images, labels = images.to(device), labels.to(device)
 
-        running_loss += loss.item()
-        if i % 10 == 9:    # 매 10 미니배치마다 출력
-            print(f'Epoch [{epoch + 1}/{num_epochs}], Step [{i + 1}/{len(dataloader)}], Loss: {running_loss / 10:.4f}')
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion_mse(outputs.squeeze(1), labels)
+            loss.backward()
+            optimizer.step()
 
-    print(f'Epoch [{epoch+1}/{num_epochs}] finished, Average Loss: {running_loss/len(dataloader):.4f}')
-print('Finished Training')
+            running_loss += loss.item()
+            if i % 10 == 9:
+                step = epoch * len(train_loader) + i
+                writer.add_scalar('Loss/train_step', loss.item(), step)
+                print(f'Epoch [{epoch + 1}/{num_epochs}], Step [{i + 1}/{len(train_loader)}], Loss: {loss.item():.4f}')
 
-torch.save(model.state_dict(), 'hb_predictor_swin_transformer.pth')
+        # Validation
+        val_loss, val_mae, val_accuracy, val_r2 = evaluate(model, val_loader, criterion_mse, criterion_mae, device)
+        writer.add_scalar('Loss/validation', val_loss, epoch)
+        writer.add_scalar('MAE/validation', val_mae, epoch)
+        writer.add_scalar('Accuracy/validation', val_accuracy, epoch)
+        writer.add_scalar('R-squared/validation', val_r2, epoch)
+
+        print(f'\nEpoch [{epoch+1}/{num_epochs}] Validation - Loss: {val_loss:.4f}, MAE: {val_mae:.4f}, Accuracy: {val_accuracy:.2f}%, R-squared: {val_r2:.4f}\n')
+
+        # Save best model
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(model.state_dict(), 'best_hb_predictor.pth')
+            print(f"Saved new best model with validation loss: {val_loss:.4f}")
+
+    writer.close()
+    print('--- Finished Training ---\n')
+
+    # 6. Final Testing
+    print("--- Loading best model for final testing ---")
+    model.load_state_dict(torch.load('best_hb_predictor.pth'))
+    test_loss, test_mae, test_accuracy, test_r2 = evaluate(model, test_loader, criterion_mse, criterion_mae, device)
+    print(f"Final Test Results -> Loss: {test_loss:.4f}, MAE: {test_mae:.4f}, Accuracy (tolerance 1.0): {test_accuracy:.2f}%, R-squared: {test_r2:.4f}")
