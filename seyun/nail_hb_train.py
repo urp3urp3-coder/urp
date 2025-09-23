@@ -15,15 +15,15 @@ class HbRegressionDataset(Dataset):
         self.transform = transform
 
     def __len__(self):
-        return len(self.data)
+        return len(self.metadata)
 
     def __getitem__(self, idx):
         img_name = self.metadata.loc[idx, 'ID']
         hb_value = self.metadata.loc[idx, 'Hemoglobina']
 
-        img_path = os.path.join(self.img_dir, img_name)
+        img_path = self.find_img_path(self.img_dir, img_name)
         if img_path is None:
-            raise FileNotFoundError(f"Image not found: {img_path}")
+            raise FileNotFoundError(f"Image '{img_name}' not found in '{self.img_dir}'")
         image = Image.open(img_path).convert('RGB')
 
         if self.transform:
@@ -50,7 +50,8 @@ transform = timm.data.create_transform(**data_config)
 ROOT_DATA_DIR = 'seyun/Diff-Mix/una-001-output/'
 CSV_FILE_PATH = os.path.join(ROOT_DATA_DIR, 'metadata.csv')
 dataset = HbRegressionDataset(csv_file=CSV_FILE_PATH, img_dir=ROOT_DATA_DIR, transform=transform)
-dataloader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=4)
+# NOTE: num_workers > 0 can cause issues on Windows. Set to 0 for debugging, especially on different hardware.
+dataloader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=0)
 
 # Swin Transformer
 model = timm.create_model(
@@ -77,7 +78,8 @@ for epoch in range(num_epochs):
         optimizer.zero_grad()
 
         outputs = model(images)
-        loss = criterion(outputs, labels)
+        # Squeeze model output to match label shape (B, 1) -> (B)
+        loss = criterion(outputs.squeeze(1), labels)
         loss.backward()
         optimizer.step()
 
@@ -89,4 +91,3 @@ for epoch in range(num_epochs):
 print('Finished Training')
 
 torch.save(model.state_dict(), 'hb_predictor_swin_transformer.pth')
-
