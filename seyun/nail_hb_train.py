@@ -10,20 +10,56 @@ import torch.optim as optim
 
 class HbRegressionDataset(Dataset):
     def __init__(self, csv_file, img_dir, transform=None):
-        self.metadata = pd.read_csv(csv_file)
         self.img_dir = img_dir
         self.transform = transform
+        
+        all_metadata = pd.read_csv(csv_file)
+        
+        # Pre-filter the metadata to include only entries with valid, findable images.
+        # This avoids errors during training and is more efficient.
+        valid_indices = []
+        image_paths = []
+        print("Verifying dataset integrity... This might take a moment.")
+        for idx, row in all_metadata.iterrows():
+            img_name = row['ID']
+            # _find_img_path is a new robust method to find images
+            img_path = self._find_img_path(self.img_dir, str(img_name))
+            if img_path:
+                valid_indices.append(idx)
+                image_paths.append(img_path)
+            # else:
+            #     print(f"Warning: Image for ID '{img_name}' not found. Excluding from dataset.")
+
+        self.metadata = all_metadata.loc[valid_indices].reset_index(drop=True)
+        # Store the full, verified path to avoid searching again in __getitem__
+        self.metadata['image_path'] = image_paths
+        
+        print(f"Dataset ready. Found {len(self.metadata)} valid image entries out of {len(all_metadata)}.")
 
     def __len__(self):
         return len(self.metadata)
 
-    def __getitem__(self, idx):
-        img_name = self.metadata.loc[idx, 'ID']
-        hb_value = self.metadata.loc[idx, 'Hemoglobina']
+    def _find_img_path(self, root, img_name):
+        """
+        Robustly finds an image file in a directory tree,
+        matching against the name with and without extension.
+        """
+        for dirpath, _, filenames in os.walk(root):
+            for filename in filenames:
+                name_part, _ = os.path.splitext(filename)
+                # Case 1: The ID from CSV matches the filename without extension (e.g., 'ID265' -> 'ID265.jpg')
+                if name_part == img_name:
+                    return os.path.join(dirpath, filename)
+                # Case 2: The ID from CSV matches the full filename (e.g., 'ID265.jpg' -> 'ID265.jpg')
+                if filename == img_name:
+                    return os.path.join(dirpath, filename)
+        return None
 
-        img_path = self.find_img_path(self.img_dir, img_name)
-        if img_path is None:
-            raise FileNotFoundError(f"Image '{img_name}' not found in '{self.img_dir}'")
+    def __getitem__(self, idx):
+        # Use the pre-verified path for efficiency
+        img_path = self.metadata.loc[idx, 'image_path']
+        hb_value = self.metadata.loc[idx, 'Hemoglobina']
+        
         image = Image.open(img_path).convert('RGB')
 
         if self.transform:
@@ -32,12 +68,6 @@ class HbRegressionDataset(Dataset):
         hb_value = torch.tensor(hb_value, dtype=torch.float32)
 
         return image, hb_value
-    
-    def find_img_path(self, root, img_name):
-        for dirpath, _, filenames in os.walk(root):
-            if img_name in filenames:
-                return os.path.join(dirpath, img_name)
-        return None
 
 # 최종 실험 때는 경로 수정해야 함. 
 # csv_file: seyun\Diff-Mix\una-001-output\metadata.csv
