@@ -59,30 +59,35 @@ class HbRegressionDataset(Dataset):
 
 def evaluate(model, dataloader, criterion_mse, criterion_mae, device, accuracy_tolerance=1.0):
     model.eval()
-    total_mse_loss = 0.0
-    total_mae = 0.0
-    correct_predictions = 0
-    total_samples = 0
+    all_outputs = []
+    all_labels = []
 
     with torch.no_grad():
         for images, labels in dataloader:
             images, labels = images.to(device), labels.to(device)
             outputs = model(images).squeeze(1)
-            
-            mse_loss = criterion_mse(outputs, labels)
-            mae = criterion_mae(outputs, labels)
-            
-            total_mse_loss += mse_loss.item() * images.size(0)
-            total_mae += mae.item() * images.size(0)
-            
-            # For regression, we define 'accuracy' as predictions within a certain tolerance.
-            correct_predictions += (torch.abs(outputs - labels) < accuracy_tolerance).sum().item()
-            total_samples += images.size(0)
+            all_outputs.append(outputs)
+            all_labels.append(labels)
 
-    avg_mse_loss = total_mse_loss / total_samples
-    avg_mae = total_mae / total_samples
+    # Concatenate lists of tensors into single tensors
+    all_outputs = torch.cat(all_outputs)
+    all_labels = torch.cat(all_labels)
+
+    # Calculate all metrics on the full validation/test set
+    mse_loss = criterion_mse(all_outputs, all_labels).item()
+    mae = criterion_mae(all_outputs, all_labels).item()
+    
+    # Accuracy calculation
+    total_samples = len(all_labels)
+    correct_predictions = (torch.abs(all_outputs - all_labels) < accuracy_tolerance).sum().item()
     accuracy = (correct_predictions / total_samples) * 100
-    return avg_mse_loss, avg_mae, accuracy
+
+    # R-squared (R²) calculation
+    ss_tot = torch.sum((all_labels - torch.mean(all_labels)) ** 2)
+    ss_res = torch.sum((all_labels - all_outputs) ** 2)
+    r2_score = (1 - ss_res / ss_tot).item()
+
+    return mse_loss, mae, accuracy, r2_score
 
 # --- Main Execution ---
 if __name__ == '__main__':
@@ -137,12 +142,13 @@ if __name__ == '__main__':
                 print(f'Epoch [{epoch + 1}/{num_epochs}], Step [{i + 1}/{len(train_loader)}], Loss: {loss.item():.4f}')
 
         # Validation
-        val_loss, val_mae, val_accuracy = evaluate(model, val_loader, criterion_mse, criterion_mae, device)
+        val_loss, val_mae, val_accuracy, val_r2 = evaluate(model, val_loader, criterion_mse, criterion_mae, device)
         writer.add_scalar('Loss/validation', val_loss, epoch)
         writer.add_scalar('MAE/validation', val_mae, epoch)
         writer.add_scalar('Accuracy/validation', val_accuracy, epoch)
+        writer.add_scalar('R-squared/validation', val_r2, epoch)
 
-        print(f'\nEpoch [{epoch+1}/{num_epochs}] Validation - Loss: {val_loss:.4f}, MAE: {val_mae:.4f}, Accuracy: {val_accuracy:.2f}%\n')
+        print(f'\nEpoch [{epoch+1}/{num_epochs}] Validation - Loss: {val_loss:.4f}, MAE: {val_mae:.4f}, Accuracy: {val_accuracy:.2f}%, R-squared: {val_r2:.4f}\n')
 
         # Save best model
         if val_loss < best_val_loss:
@@ -156,5 +162,5 @@ if __name__ == '__main__':
     # 6. Final Testing
     print("--- Loading best model for final testing ---")
     model.load_state_dict(torch.load('best_hb_predictor.pth'))
-    test_loss, test_mae, test_accuracy = evaluate(model, test_loader, criterion_mse, criterion_mae, device)
-    print(f"Final Test Results -> Loss: {test_loss:.4f}, MAE: {test_mae:.4f}, Accuracy (tolerance 1.0): {test_accuracy:.2f}%")
+    test_loss, test_mae, test_accuracy, test_r2 = evaluate(model, test_loader, criterion_mse, criterion_mae, device)
+    print(f"Final Test Results -> Loss: {test_loss:.4f}, MAE: {test_mae:.4f}, Accuracy (tolerance 1.0): {test_accuracy:.2f}%, R-squared: {test_r2:.4f}")
