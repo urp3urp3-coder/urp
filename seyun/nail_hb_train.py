@@ -69,20 +69,16 @@ def evaluate(model, dataloader, criterion_mse, criterion_mae, device, accuracy_t
             all_outputs.append(outputs)
             all_labels.append(labels)
 
-    # Concatenate lists of tensors into single tensors
     all_outputs = torch.cat(all_outputs)
     all_labels = torch.cat(all_labels)
 
-    # Calculate all metrics on the full validation/test set
     mse_loss = criterion_mse(all_outputs, all_labels).item()
     mae = criterion_mae(all_outputs, all_labels).item()
     
-    # Accuracy calculation
     total_samples = len(all_labels)
     correct_predictions = (torch.abs(all_outputs - all_labels) < accuracy_tolerance).sum().item()
     accuracy = (correct_predictions / total_samples) * 100
 
-    # R-squared (R²) calculation
     ss_tot = torch.sum((all_labels - torch.mean(all_labels)) ** 2)
     ss_res = torch.sum((all_labels - all_outputs) ** 2)
     r2_score = (1 - ss_res / ss_tot).item()
@@ -91,18 +87,19 @@ def evaluate(model, dataloader, criterion_mse, criterion_mae, device, accuracy_t
 
 # --- Main Execution ---
 if __name__ == '__main__':
-    # 1. Setup
     writer = SummaryWriter('runs/hb_predictor_experiment')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # 2. Paths and Transformations
-    ROOT_DATA_DIR = 'seyun/Diff-Mix/una-001-output/'
+
+    # 메인 루트
+    ROOT_DATA_DIR = 'seyun/Diff-Mix/real-data/'
+    # 실험용 루트
+    # ROOT_DATA_DIR = 'seyun/Diff-Mix/una-001-output/'
     CSV_FILE_PATH = os.path.join(ROOT_DATA_DIR, 'metadata.csv')
     data_config = timm.data.resolve_data_config({}, model='swin_tiny_patch4_window7_224')
     transform = timm.data.create_transform(**data_config)
 
-    # 3. Data Loading
     train_dataset = HbRegressionDataset(csv_file=CSV_FILE_PATH, img_dir=os.path.join(ROOT_DATA_DIR, 'train'), transform=transform)
     val_dataset = HbRegressionDataset(csv_file=CSV_FILE_PATH, img_dir=os.path.join(ROOT_DATA_DIR, 'validation'), transform=transform)
     test_dataset = HbRegressionDataset(csv_file=CSV_FILE_PATH, img_dir=os.path.join(ROOT_DATA_DIR, 'test'), transform=transform)
@@ -111,7 +108,6 @@ if __name__ == '__main__':
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=0)
 
-    # 4. Model, Loss, Optimizer
     model = timm.create_model('swin_tiny_patch4_window7_224', pretrained=True, num_classes=1)
     model.to(device)
 
@@ -120,7 +116,6 @@ if __name__ == '__main__':
     optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-5)
     num_epochs = 10
 
-    # 5. Training & Validation Loop
     best_val_loss = float('inf')
     print("\n--- Starting Training ---")
     for epoch in range(num_epochs):
@@ -141,7 +136,6 @@ if __name__ == '__main__':
                 writer.add_scalar('Loss/train_step', loss.item(), step)
                 print(f'Epoch [{epoch + 1}/{num_epochs}], Step [{i + 1}/{len(train_loader)}], Loss: {loss.item():.4f}')
 
-        # Validation
         val_loss, val_mae, val_accuracy, val_r2 = evaluate(model, val_loader, criterion_mse, criterion_mae, device)
         writer.add_scalar('Loss/validation', val_loss, epoch)
         writer.add_scalar('MAE/validation', val_mae, epoch)
@@ -150,7 +144,6 @@ if __name__ == '__main__':
 
         print(f'\nEpoch [{epoch+1}/{num_epochs}] Validation - Loss: {val_loss:.4f}, MAE: {val_mae:.4f}, Accuracy: {val_accuracy:.2f}%, R-squared: {val_r2:.4f}\n')
 
-        # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), 'best_hb_predictor.pth')
@@ -159,7 +152,6 @@ if __name__ == '__main__':
     writer.close()
     print('--- Finished Training ---\n')
 
-    # 6. Final Testing
     print("--- Loading best model for final testing ---")
     model.load_state_dict(torch.load('best_hb_predictor.pth'))
     test_loss, test_mae, test_accuracy, test_r2 = evaluate(model, test_loader, criterion_mse, criterion_mae, device)
