@@ -3,28 +3,13 @@ import torch
 import timm
 import os
 import math
+import argparse
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 from torchvision import transforms
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-
-# -----------------------
-# Config
-# -----------------------
-IMG_SIZE = 384
-BATCH_SIZE = 8
-EPOCHS_STAGE1 = 8
-EPOCHS_STAGE2 = 25
-LR_HEAD = 3e-4
-LR_BACKBONE = 3e-5
-WEIGHT_DECAY = 5e-2
-ROOT_DATA_DIR = 'seyun/Diff-Mix/real-data/'
-CSV_FILE_PATH = os.path.join(ROOT_DATA_DIR, 'metadata.csv')
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-ACCURACY_TOLERANCE = 1.0
-NUM_WORKERS = 0 
 
 # -----------------------
 # Dataset
@@ -68,20 +53,9 @@ class HbRegressionDataset(Dataset):
         return image, hb_value
 
 # -----------------------
-# Transforms
-# -----------------------
-# 데이터 증강(augmentation)은 Diff-Mix로 따로 할거임. 
-# 기본적인 리사이즈, 텐서 변환, 정규화만 적용
-transform = transforms.Compose([
-    transforms.Resize((IMG_SIZE, IMG_SIZE)),
-    transforms.ToTensor(),
-    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-])
-
-# -----------------------
 # Evaluation
 # -----------------------
-def evaluate(model, dataloader, criterion, device):
+def evaluate(model, dataloader, criterion, device, accuracy_tolerance):
     model.eval()
     all_outputs = []
     all_labels = []
@@ -89,7 +63,7 @@ def evaluate(model, dataloader, criterion, device):
     with torch.no_grad():
         for images, labels in dataloader:
             images, labels = images.to(device), labels.to(device)
-            with torch.cuda.amp.autocast(enabled=(device=="cuda")):
+            with torch.amp.autocast('cuda', enabled=(device=="cuda")):
                 outputs = model(images).squeeze(1)
                 loss = criterion(outputs, labels)
             running_loss += loss.item() * images.size(0)
@@ -101,7 +75,7 @@ def evaluate(model, dataloader, criterion, device):
     
     val_loss = running_loss / len(dataloader.dataset)
     mae = nn.L1Loss()(all_outputs, all_labels).item()
-    correct_predictions = (torch.abs(all_outputs - all_labels) < ACCURACY_TOLERANCE).sum().item()
+    correct_predictions = (torch.abs(all_outputs - all_labels) < accuracy_tolerance).sum().item()
     accuracy = (correct_predictions / len(all_labels)) * 100
     
     ss_tot = torch.sum((all_labels - torch.mean(all_labels)) ** 2)
@@ -113,9 +87,36 @@ def evaluate(model, dataloader, criterion, device):
 # -----------------------
 # Main Execution
 # -----------------------
-def main():
-    writer = SummaryWriter('runs/hb_predictor_finetune_experiment')
+def main(args):
+    # -----------------------
+    # Config
+    # -----------------------
+    IMG_SIZE = args.img_size
+    BATCH_SIZE = args.batch_size
+    EPOCHS_STAGE1 = args.epochs_stage1
+    EPOCHS_STAGE2 = args.epochs_stage2
+    LR_HEAD = args.lr_head
+    LR_BACKBONE = args.lr_backbone
+    WEIGHT_DECAY = args.weight_decay
+    ROOT_DATA_DIR = args.root_data_dir
+    CSV_FILE_PATH = os.path.join(ROOT_DATA_DIR, 'metadata.csv')
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    ACCURACY_TOLERANCE = args.accuracy_tolerance
+    NUM_WORKERS = args.num_workers
+    
+    run_name = f"run_LRH_{LR_HEAD}_LRB_{LR_BACKBONE}_WD_{WEIGHT_DECAY}_BS_{BATCH_SIZE}"
+    writer = SummaryWriter(f'runs/{run_name}')
     print(f"Using device: {DEVICE}")
+    print(f"Starting run: {run_name}")
+
+    # -----------------------
+    # Transforms
+    # -----------------------
+    transform = transforms.Compose([
+        transforms.Resize((IMG_SIZE, IMG_SIZE)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+    ])
 
     # Data
     train_dataset = HbRegressionDataset(csv_file=CSV_FILE_PATH, img_dir=os.path.join(ROOT_DATA_DIR, 'train'), transform=transform)
@@ -131,11 +132,12 @@ def main():
         "swin_small_patch4_window7_224.ms_in22k",
         pretrained=True,
         num_classes=1,
+        img_size=IMG_SIZE,
     )
     model = model.to(DEVICE)
 
     criterion = nn.SmoothL1Loss()
-    scaler = torch.cuda.amp.GradScaler(enabled=(DEVICE=="cuda"))
+    scaler = torch.amp.GradScaler('cuda', enabled=(DEVICE=="cuda"))
     
     def param_groups(m):
         head, back = [], []
@@ -150,6 +152,8 @@ def main():
     total_epochs = EPOCHS_STAGE1 + EPOCHS_STAGE2
     iters_per_epoch = len(train_loader)
     best_val_loss = float('inf')
+    
+    model_save_path = f"swinS_in22k_hb_best_{run_name}.pth"
 
     # --- Stage 1 ---
     print("\n--- Starting Stage 1: Training head and deep layers ---")
@@ -168,7 +172,7 @@ def main():
         model.train()
         for i, (images, labels) in enumerate(train_loader):
             images, labels = images.to(DEVICE), labels.to(DEVICE)
-            with torch.cuda.amp.autocast(enabled=(DEVICE=="cuda")):
+            with torch.amp.autocast('cuda', enabled=(DEVICE=="cuda")):
                 outputs = model(images).squeeze(1)
                 loss = criterion(outputs, labels)
             scaler.scale(loss).backward()
@@ -183,7 +187,7 @@ def main():
                 writer.add_scalar('LR/head', optimizer.param_groups[0]['lr'], step)
                 writer.add_scalar('LR/backbone', optimizer.param_groups[1]['lr'], step)
 
-        val_loss, val_mae, val_accuracy, val_r2 = evaluate(model, val_loader, criterion, DEVICE)
+        val_loss, val_mae, val_accuracy, val_r2 = evaluate(model, val_loader, criterion, DEVICE, ACCURACY_TOLERANCE)
         print(f'\nEpoch [{epoch+1}/{total_epochs}] (Stage 1) Validation -> Loss: {val_loss:.4f}, MAE: {val_mae:.4f}, Acc: {val_accuracy:.2f}%, R2: {val_r2:.4f}\n')
         writer.add_scalar('Loss/validation', val_loss, epoch)
         writer.add_scalar('MAE/validation', val_mae, epoch)
@@ -192,7 +196,7 @@ def main():
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), "swinS_in22k_hb_best.pth")
+            torch.save(model.state_dict(), model_save_path)
             print(f"Saved new best model with validation loss: {val_loss:.4f}")
 
     # --- Stage 2 ---
@@ -200,10 +204,8 @@ def main():
     for p in model.parameters():
         p.requires_grad = True
     
-    # Optimizer를 다시 만들어 모든 파라미터를 포함시킵니다.
     optimizer = torch.optim.AdamW(param_groups(model), weight_decay=WEIGHT_DECAY)
     
-    # 스케줄러도 새로 만들어 현재 step에 맞게 상태를 조정합니다.
     current_step = EPOCHS_STAGE1 * iters_per_epoch
     def lr_lambda_stage2(step):
         actual_step = step + current_step
@@ -214,7 +216,7 @@ def main():
         model.train()
         for i, (images, labels) in enumerate(train_loader):
             images, labels = images.to(DEVICE), labels.to(DEVICE)
-            with torch.cuda.amp.autocast(enabled=(DEVICE=="cuda")):
+            with torch.amp.autocast('cuda', enabled=(DEVICE=="cuda")):
                 outputs = model(images).squeeze(1)
                 loss = criterion(outputs, labels)
             scaler.scale(loss).backward()
@@ -229,7 +231,7 @@ def main():
                 writer.add_scalar('LR/head', optimizer.param_groups[0]['lr'], step)
                 writer.add_scalar('LR/backbone', optimizer.param_groups[1]['lr'], step)
 
-        val_loss, val_mae, val_accuracy, val_r2 = evaluate(model, val_loader, criterion, DEVICE)
+        val_loss, val_mae, val_accuracy, val_r2 = evaluate(model, val_loader, criterion, DEVICE, ACCURACY_TOLERANCE)
         print(f'\nEpoch [{epoch+1}/{total_epochs}] (Stage 2) Validation -> Loss: {val_loss:.4f}, MAE: {val_mae:.4f}, Acc: {val_accuracy:.2f}%, R2: {val_r2:.4f}\n')
         writer.add_scalar('Loss/validation', val_loss, epoch)
         writer.add_scalar('MAE/validation', val_mae, epoch)
@@ -238,7 +240,7 @@ def main():
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), "swinS_in22k_hb_best.pth")
+            torch.save(model.state_dict(), model_save_path)
             print(f"Saved new best model with validation loss: {val_loss:.4f}")
 
     writer.close()
@@ -246,9 +248,22 @@ def main():
     
     # --- Final Test ---
     print("--- Loading best model for final testing ---")
-    model.load_state_dict(torch.load("swinS_in22k_hb_best.pth"))
-    test_loss, test_mae, test_accuracy, test_r2 = evaluate(model, test_loader, criterion, DEVICE)
+    model.load_state_dict(torch.load(model_save_path))
+    test_loss, test_mae, test_accuracy, test_r2 = evaluate(model, test_loader, criterion, DEVICE, ACCURACY_TOLERANCE)
     print(f"Final Test Results -> Loss: {test_loss:.4f}, MAE: {test_mae:.4f}, Accuracy (tolerance {ACCURACY_TOLERANCE}): {test_accuracy:.2f}%, R-squared: {test_r2:.4f}")
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description='Train a hemoglobin prediction model.')
+    parser.add_argument('--img-size', type=int, default=384, help='Input image size')
+    parser.add_argument('--batch-size', type=int, default=8, help='Batch size for training')
+    parser.add_argument('--epochs-stage1', type=int, default=8, help='Number of epochs for stage 1 training')
+    parser.add_argument('--epochs-stage2', type=int, default=25, help='Number of epochs for stage 2 training')
+    parser.add_argument('--lr-head', type=float, default=3e-4, help='Learning rate for the model head')
+    parser.add_argument('--lr-backbone', type=float, default=3e-5, help='Learning rate for the model backbone')
+    parser.add_argument('--weight-decay', type=float, default=5e-2, help='Weight decay for the optimizer')
+    parser.add_argument('--root-data-dir', type=str, default='seyun/Diff-Mix/real-data/', help='Root directory of the dataset')
+    parser.add_argument('--accuracy-tolerance', type=float, default=1.0, help='Accuracy tolerance for evaluation')
+    parser.add_argument('--num-workers', type=int, default=0, help='Number of workers for DataLoader')
+    
+    args = parser.parse_args()
+    main(args)
