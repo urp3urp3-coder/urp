@@ -1,4 +1,6 @@
 
+from diffusers.utils import check_min_version
+from PIL import Image
 from torchvision import transforms
 from tqdm.auto import tqdm
 
