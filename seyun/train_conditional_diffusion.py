@@ -1,4 +1,19 @@
+import argparse
+import os
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
 
+from accelerate import Accelerator
+from accelerate.logging import get_logger
+from accelerate.utils import set_seed
+
+from diffusers import AutoencoderKL, DDPMScheduler, UNet2DConditionModel
+from diffusers.loaders import AttnProcsLayers
+from diffusers.models.attention_processor import LoRAAttnProcessor
+from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from PIL import Image
 from torchvision import transforms
@@ -9,9 +24,9 @@ check_min_version("0.15.0.dev0")
 
 logger = get_logger(__name__)
 
-# -----------------------------------
+# ----------------------------------- 
 # 1. Custom Conditioning Model
-# -----------------------------------
+# ----------------------------------- 
 class ConditioningMLP(nn.Module):
     """
     A simple MLP to project a scalar hemoglobin value to a high-dimensional embedding.
@@ -32,9 +47,9 @@ class ConditioningMLP(nn.Module):
             x = x.unsqueeze(1)
         return self.net(x)
 
-# -----------------------------------
+# ----------------------------------- 
 # 2. Custom Dataset
-# -----------------------------------
+# ----------------------------------- 
 class ConditionalNailDataset(Dataset):
     """Reads the pre-processed CSV and provides (image, hb_value) pairs."""
     def __init__(self, csv_file, image_size):
@@ -91,9 +106,9 @@ def main():
     if args.seed is not None:
         set_seed(args.seed)
 
-    # -----------------------------------
+    # ----------------------------------- 
     # 3. Load Models (VAE, UNet, Scheduler)
-    # -----------------------------------
+    # ----------------------------------- 
     noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
     vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae")
     unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet")
@@ -101,9 +116,9 @@ def main():
     # Freeze VAE as we are only training the UNet
     vae.requires_grad_(False)
 
-    # -----------------------------------
+    # ----------------------------------- 
     # 4. Setup LoRA and Conditioning MLP
-    # -----------------------------------
+    # ----------------------------------- 
     # Add LoRA layers to the UNet
     lora_attn_procs = {}
     for name in unet.attn_processors.keys():
@@ -129,9 +144,9 @@ def main():
     # The output dimension must match the UNet's cross_attention_dim
     cond_mlp = ConditioningMLP(out_dim=unet.config.cross_attention_dim)
 
-    # -----------------------------------
+    # ----------------------------------- 
     # 5. Optimizer and Dataloader
-    # -----------------------------------
+    # ----------------------------------- 
     # The optimizer should train both the LoRA layers and our conditioning MLP
     optimizer = torch.optim.AdamW(
         list(lora_layers.parameters()) + list(cond_mlp.parameters()),
@@ -148,9 +163,9 @@ def main():
         num_training_steps=(len(train_dataloader) * args.num_train_epochs),
     )
 
-    # -----------------------------------
+    # ----------------------------------- 
     # 6. Prepare for training with Accelerate
-    # -----------------------------------
+    # ----------------------------------- 
     unet, cond_mlp, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         unet, cond_mlp, optimizer, train_dataloader, lr_scheduler
     )
@@ -160,9 +175,9 @@ def main():
     if accelerator.is_main_process:
         accelerator.init_trackers("conditional-diffusion-training")
 
-    # -----------------------------------
+    # ----------------------------------- 
     # 7. Training Loop
-    # -----------------------------------
+    # ----------------------------------- 
     global_step = 0
     for epoch in range(args.num_train_epochs):
         unet.train()
@@ -225,9 +240,9 @@ def main():
             
             pbar.set_postfix(Loss=loss.detach().item(), LR=lr_scheduler.get_last_lr()[0])
 
-    # -----------------------------------
+    # ----------------------------------- 
     # 8. Save the final model
-    # -----------------------------------
+    # ----------------------------------- 
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         # Unwrap the model before saving
