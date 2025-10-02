@@ -1,6 +1,12 @@
 
 import subprocess
 import itertools
+import os
+
+# Get the absolute path to the directory containing this script
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# Path to the training script
+train_script_path = os.path.join(script_dir, 'nail_hb_train.py')
 
 # Define the grid of hyperparameters to search
 param_grid = {
@@ -23,18 +29,20 @@ for i, params in enumerate(param_combinations):
     # Construct the command
     cmd = [
         'python',
-        'seyun/nail_hb_train.py',
+        train_script_path,
         '--lr-head', str(params['lr_head']),
         '--lr-backbone', str(params['lr_backbone']),
         '--weight-decay', str(params['weight_decay']),
         '--batch-size', str(params['batch_size']),
         # You can add other fixed parameters here if needed
-        # '--epochs-stage1', '10', 
+        # '--epochs-stage1', '10',
     ]
     
     try:
         # Execute the training script
-        subprocess.run(cmd, check=True)
+        # We run it from the parent directory of the script's location to ensure relative data paths work correctly
+        working_dir = os.path.dirname(script_dir)
+        subprocess.run(cmd, check=True, cwd=working_dir)
         print(f"--- Finished Combination {i+1}/{len(param_combinations)} ---")
     except subprocess.CalledProcessError as e:
         print(f"!!! Error running combination {i+1}: {params} !!!")

@@ -12,28 +12,6 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 # -----------------------
-<<<<<<< HEAD
-=======
-# Config
-# -----------------------
-IMG_SIZE = 384
-BATCH_SIZE = 8
-EPOCHS_STAGE1 = 64
-EPOCHS_STAGE2 = 500
-LR_HEAD = 3e-4
-LR_BACKBONE = 3e-5
-WEIGHT_DECAY = 5e-2
-# 실험용 - 72+ 18 = 90장 
-# ROOT_DATA_DIR = 'Diff-Mix/una-001-output/'
-# 실제 데이터 train 619장 
-ROOT_DATA_DIR = 'Diff-Mix/real-data/'
-CSV_FILE_PATH = os.path.join(ROOT_DATA_DIR, 'metadata.csv')
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-ACCURACY_TOLERANCE = 1.0
-NUM_WORKERS = 0 
-
-# -----------------------
->>>>>>> 3c41e0dfb555e6e0ccee64d540fc45a65a331f5d
 # Dataset
 # -----------------------
 class HbRegressionDataset(Dataset):
@@ -154,11 +132,7 @@ def main(args):
         "swin_small_patch4_window7_224.ms_in22k",
         pretrained=True,
         num_classes=1,
-<<<<<<< HEAD
         img_size=IMG_SIZE,
-=======
-        img_size = IMG_SIZE,
->>>>>>> 3c41e0dfb555e6e0ccee64d540fc45a65a331f5d
     )
     model = model.to(DEVICE)
 
@@ -204,8 +178,8 @@ def main(args):
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
-            scheduler.step()
             optimizer.zero_grad()
+            scheduler.step()
             
             step = epoch * iters_per_epoch + i
             writer.add_scalar('Loss/train_step', loss.item(), step)
@@ -230,15 +204,10 @@ def main(args):
     for p in model.parameters():
         p.requires_grad = True
     
-<<<<<<< HEAD
+    # Optimizer를 다시 만들어 모든 파라미터를 포함시킵니다.
     optimizer = torch.optim.AdamW(param_groups(model), weight_decay=WEIGHT_DECAY)
     
-=======
-    # Optimizer를 다시 만들어 모든 파라미터를 포함
-    optimizer = torch.optim.AdamW(param_groups(model), weight_decay=WEIGHT_DECAY)
-    
-    # 스케줄러도 새로 만들어 현재 step에 맞게 상태를 조정
->>>>>>> 3c41e0dfb555e6e0ccee64d540fc45a65a331f5d
+    # 스케줄러도 새로 만들어 현재 step에 맞게 상태를 조정합니다.
     current_step = EPOCHS_STAGE1 * iters_per_epoch
     def lr_lambda_stage2(step):
         actual_step = step + current_step
@@ -255,8 +224,8 @@ def main(args):
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
-            scheduler.step()
             optimizer.zero_grad()
+            scheduler.step()
 
             step = epoch * iters_per_epoch + i
             writer.add_scalar('Loss/train_step', loss.item(), step)
@@ -281,13 +250,10 @@ def main(args):
     
     # --- Final Test ---
     print("--- Loading best model for final testing ---")
-<<<<<<< HEAD
-    model.load_state_dict(torch.load(model_save_path))
+    # For security, it's recommended to use weights_only=True if you are loading a checkpoint from an untrusted source.
+    # Here we trust the source as we just saved it.
+    model.load_state_dict(torch.load(model_save_path, weights_only=True))
     test_loss, test_mae, test_accuracy, test_r2 = evaluate(model, test_loader, criterion, DEVICE, ACCURACY_TOLERANCE)
-=======
-    model.load_state_dict(torch.load("swinS_in22k_hb_best.pth", weights_only=True))
-    test_loss, test_mae, test_accuracy, test_r2 = evaluate(model, test_loader, criterion, DEVICE)
->>>>>>> 3c41e0dfb555e6e0ccee64d540fc45a65a331f5d
     print(f"Final Test Results -> Loss: {test_loss:.4f}, MAE: {test_mae:.4f}, Accuracy (tolerance {ACCURACY_TOLERANCE}): {test_accuracy:.2f}%, R-squared: {test_r2:.4f}")
 
 if __name__ == '__main__':
