@@ -178,8 +178,8 @@ def main(args):
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
-            optimizer.zero_grad()
             scheduler.step()
+            optimizer.zero_grad()
             
             step = epoch * iters_per_epoch + i
             writer.add_scalar('Loss/train_step', loss.item(), step)
@@ -224,8 +224,8 @@ def main(args):
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
-            optimizer.zero_grad()
             scheduler.step()
+            optimizer.zero_grad()
 
             step = epoch * iters_per_epoch + i
             writer.add_scalar('Loss/train_step', loss.item(), step)
