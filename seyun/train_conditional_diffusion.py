@@ -122,9 +122,8 @@ def main():
     # Add LoRA layers to the UNet
     lora_attn_procs = {}
     for name in unet.attn_processors.keys():
-        # In older versions of diffusers, rank is the only argument needed.
-        # We remove hidden_size and cross_attention_dim to ensure compatibility.
-        lora_attn_procs[name] = LoRAAttnProcessor(rank=args.lora_rank)
+        # For very old versions of diffusers, LoRAAttnProcessor might not take any arguments.
+        lora_attn_procs[name] = LoRAAttnProcessor()
     unet.set_attn_processors(lora_attn_procs)
     lora_layers = AttnProcsLayers(unet.attn_processors)
 
