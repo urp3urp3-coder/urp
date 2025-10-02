@@ -67,7 +67,7 @@ def parse_args():
     parser.add_argument("--train_batch_size", type=int, default=4, help="Batch size for the training dataloader.")
     parser.add_argument("--num_train_epochs", type=int, default=100)
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Initial learning rate to use.")
-    parser.add_argument("--lr_scheduler", type=str, default="cosine", help=("The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"]"))
+    parser.add_argument("--lr_scheduler", type=str, default="cosine", help=("The scheduler type to use. Choose between ['linear', 'cosine', 'cosine_with_restarts', 'polynomial', 'constant', 'constant_with_warmup']"))
     parser.add_argument("--lr_warmup_steps", type=int, default=500, help="Number of steps for the warmup in the lr scheduler.")
     parser.add_argument("--seed", type=int, default=42, help="A seed for reproducible training.")
     parser.add_argument("--mixed_precision", type=str, default="fp16", choices=["no", "fp16", "bf16"], help="Whether to use mixed precision. Choose between fp16 and bf16 (bfloat16). Bf16 requires PyTorch >= 1.10. and an Nvidia Ampere GPU.")
