@@ -19,9 +19,6 @@ from PIL import Image
 from torchvision import transforms
 from tqdm.auto import tqdm
 
-# Will error if the minimal version of diffusers is not installed. Remove at your own risks.
-check_min_version("0.15.0.dev0")
-
 logger = get_logger(__name__)
 
 # ----------------------------------- 
@@ -58,7 +55,7 @@ class ConditionalNailDataset(Dataset):
         self.transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]), # Normalize to [-1, 1] for diffusion models
+            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]), # Normalize to [-1, 1] for diffusion models
         ])
 
     def __len__(self):
@@ -125,9 +122,15 @@ def main():
         cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
         if name.startswith("mid_block"):
             hidden_size = unet.config.block_out_channels[-1]
+        
+        # 여기 점 단위로 split 해서 block id 가져오는 부분이 잘못된 것 같음
         elif name.startswith("up_blocks"):
-            block_id = int(name[len("up_blocks.")])
+            block_id = int(name.split(".")[1])
             hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
+        elif name.startswith("down_blocks"):
+            block_id = int(name.split(".")[1])
+            hidden_size = unet.config.block_out_channels[block_id]
+
         elif name.startswith("down_blocks"):
             block_id = int(name[len("down_blocks.")])
             hidden_size = unet.config.block_out_channels[block_id]
@@ -137,7 +140,7 @@ def main():
             cross_attention_dim=cross_attention_dim,
             rank=args.lora_rank
         )
-    unet.set_attn_processors(lora_attn_procs)
+    unet.set_attn_processor(lora_attn_procs)
     lora_layers = AttnProcsLayers(unet.attn_processors)
 
     # Initialize our custom conditioning model
@@ -238,7 +241,14 @@ def main():
                 accelerator.log({"train_loss": train_loss}, step=global_step)
                 train_loss = 0.0
             
-            pbar.set_postfix(Loss=loss.detach().item(), LR=lr_scheduler.get_last_lr()[0])
+            # pbar.set_postfix(Loss=loss.detach().item(), LR=lr_scheduler.get_last_lr()[0])
+            try:
+                last_lr = lr_scheduler.get_last_lr()
+                last_lr = last_lr[0] if isinstance(last_lr, (list, tuple)) else float(last_lr)
+            except Exception:
+                last_lr = optimizer.param_groups[0]["lr"]
+                pbar.set_postfix(Loss=loss.detach().item(), LR=last_lr)
+
 
     # ----------------------------------- 
     # 8. Save the final model
