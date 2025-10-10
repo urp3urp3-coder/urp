@@ -100,6 +100,10 @@ def main():
         project_dir=args.output_dir,
     )
 
+    logger.info(f"Using device: {accelerator.device}")
+    if accelerator.device.type == "cpu":
+        logger.warning("Accelerator is using CPU. If you have a GPU, check your PyTorch and CUDA installation.")
+
     if args.seed is not None:
         set_seed(args.seed)
 
