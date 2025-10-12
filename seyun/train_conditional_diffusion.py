@@ -264,7 +264,7 @@ def main():
         cond_mlp = accelerator.unwrap_model(cond_mlp)
 
         # Save the LoRA layers
-        lora_layers.save_attn_procs(args.output_dir)
+        unet.save_attn_procs(args.output_dir)
         
         # Save the conditioning MLP
         torch.save(cond_mlp.state_dict(), os.path.join(args.output_dir, "conditioning_mlp.pth"))
