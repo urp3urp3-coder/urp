@@ -139,9 +139,7 @@ def main():
             block_id = int(name[len("down_blocks.")])
             hidden_size = unet.config.block_out_channels[block_id]
         
-        lora_attn_procs[name] = LoRAAttnProcessor(
-            rank=args.lora_rank
-        )
+        lora_attn_procs[name] = LoRAAttnProcessor()
     unet.set_attn_processor(lora_attn_procs)
     lora_layers = AttnProcsLayers(unet.attn_processors)
 
