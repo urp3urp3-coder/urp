@@ -286,7 +286,8 @@ if __name__ == '__main__':
     parser.add_argument('--lr-head', type=float, default=3e-4, help='Learning rate for the model head')
     parser.add_argument('--lr-backbone', type=float, default=3e-5, help='Learning rate for the model backbone')
     parser.add_argument('--weight-decay', type=float, default=5e-2, help='Weight decay for the optimizer')
-    parser.add_argument('--root-data-dir', type=str, default='seyun/Diff-Mix/real-data/', help='Root directory of the dataset')
+    parser.add_argument('--root-data-dir', type=str, default='una-001-output', help='Root directory of the dataset')
+    # C:\Users\parkj\Desktop\urp\augmentation\urp\seyun\una-001-output
     parser.add_argument('--accuracy-tolerance', type=float, default=1.0, help='Accuracy tolerance for evaluation')
     parser.add_argument('--num-workers', type=int, default=0, help='Number of workers for DataLoader')
     
