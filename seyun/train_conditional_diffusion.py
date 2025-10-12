@@ -140,8 +140,6 @@ def main():
             hidden_size = unet.config.block_out_channels[block_id]
         
         lora_attn_procs[name] = LoRAAttnProcessor(
-            hidden_size=hidden_size, 
-            cross_attention_dim=cross_attention_dim,
             rank=args.lora_rank
         )
     unet.set_attn_processor(lora_attn_procs)
