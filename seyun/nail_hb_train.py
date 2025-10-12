@@ -198,8 +198,8 @@ def main(args):
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
-            scheduler.step()
             optimizer.zero_grad()
+            scheduler.step()
             
             step = epoch * iters_per_epoch + i
             writer.add_scalar('Loss/train_step', loss.item(), step)
@@ -225,7 +225,7 @@ def main(args):
         p.requires_grad = True
     
     # Optimizer를 다시 만들어 모든 파라미터를 포함시킵니다.
-    optimizer = torch.optim.AdamW(param_groups(model), weight_decay=WEIGHT_DECAY)
+    optimizer = torch.optim.AdamW(get_param_groups(model, LR_HEAD, LR_BACKBONE), weight_decay=WEIGHT_DECAY)
     
     # 스케줄러도 새로 만들어 현재 step에 맞게 상태를 조정합니다.
     current_step = EPOCHS_STAGE1 * iters_per_epoch
@@ -244,8 +244,8 @@ def main(args):
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
-            scheduler.step()
             optimizer.zero_grad()
+            scheduler.step()
 
             step = epoch * iters_per_epoch + i
             writer.add_scalar('Loss/train_step', loss.item(), step)
