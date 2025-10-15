@@ -100,6 +100,10 @@ def main():
         project_dir=args.output_dir,
     )
 
+    logger.info(f"Using device: {accelerator.device}")
+    if accelerator.device.type == "cpu":
+        logger.warning("Accelerator is using CPU. If you have a GPU, check your PyTorch and CUDA installation.")
+
     if args.seed is not None:
         set_seed(args.seed)
 
@@ -131,9 +135,9 @@ def main():
             block_id = int(name.split(".")[1])
             hidden_size = unet.config.block_out_channels[block_id]
 
-        elif name.startswith("down_blocks"):
-            block_id = int(name[len("down_blocks.")])
-            hidden_size = unet.config.block_out_channels[block_id]
+        # elif name.startswith("down_blocks"):
+        #     block_id = int(name[len("down_blocks.")])
+        #     hidden_size = unet.config.block_out_channels[block_id]
         
         lora_attn_procs[name] = LoRAAttnProcessor(
             hidden_size=hidden_size, 
@@ -260,7 +264,7 @@ def main():
         cond_mlp = accelerator.unwrap_model(cond_mlp)
 
         # Save the LoRA layers
-        lora_layers.save_attn_procs(args.output_dir)
+        unet.save_attn_procs(args.output_dir)
         
         # Save the conditioning MLP
         torch.save(cond_mlp.state_dict(), os.path.join(args.output_dir, "conditioning_mlp.pth"))

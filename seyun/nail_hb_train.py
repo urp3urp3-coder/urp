@@ -128,40 +128,60 @@ def main(args):
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, pin_memory=True)
 
     # Model
+    print(f"Creating model: {args.model_name}")
     model = timm.create_model(
-        "swin_small_patch4_window7_224.ms_in22k",
+        args.model_name,
         pretrained=True,
         num_classes=1,
-        img_size=IMG_SIZE,
     )
     model = model.to(DEVICE)
 
     criterion = nn.SmoothL1Loss()
     scaler = torch.amp.GradScaler('cuda', enabled=(DEVICE=="cuda"))
     
-    def param_groups(m):
-        head, back = [], []
-        for n, p in m.named_parameters():
-            if not p.requires_grad: continue
-            if "head" in n or "norm" in n or "stages.3" in n:
-                head.append(p)
-            else:
-                back.append(p)
-        return [{"params": head, "lr": LR_HEAD}, {"params": back, "lr": LR_BACKBONE}]
+    def get_param_groups(m, head_lr, backbone_lr):
+        try:
+            classifier_params = m.get_classifier().parameters()
+        except AttributeError:
+            # Fallback for models that don't have get_classifier()
+            # Assumes the last nn.Linear module is the classifier
+            classifier_name = [n for n, _ in m.named_modules() if isinstance(_, nn.Linear)][-1]
+            classifier_params = m.get_submodule(classifier_name).parameters()
+
+        classifier_param_ids = {id(p) for p in classifier_params}
+        
+        backbone_params = [p for p in m.parameters() if id(p) not in classifier_param_ids and p.requires_grad]
+        head_params = [p for p in m.parameters() if id(p) in classifier_param_ids and p.requires_grad]
+        
+        print(f"Found {len(head_params)} parameters in head and {len(backbone_params)} in backbone.")
+        
+        return [
+            {"params": head_params, "lr": head_lr},
+            {"params": backbone_params, "lr": backbone_lr},
+        ]
 
     total_epochs = EPOCHS_STAGE1 + EPOCHS_STAGE2
     iters_per_epoch = len(train_loader)
     best_val_loss = float('inf')
     
-    model_save_path = f"swinS_in22k_hb_best_{run_name}.pth"
+    model_save_path = f"{args.model_name.replace('/', '_')}_hb_best_{run_name}.pth"
 
     # --- Stage 1 ---
-    print("\n--- Starting Stage 1: Training head and deep layers ---")
-    for name, p in model.named_parameters():
-        if any(k in name for k in ["stages.0", "stages.1"]):
-            p.requires_grad = False
+    print("\n--- Starting Stage 1: Training head only ---")
+    # Freeze all parameters first
+    for param in model.parameters():
+        param.requires_grad = False
     
-    optimizer = torch.optim.AdamW(param_groups(model), weight_decay=WEIGHT_DECAY)
+    # Unfreeze only the classifier head
+    try:
+        for param in model.get_classifier().parameters():
+            param.requires_grad = True
+    except AttributeError:
+        classifier_name = [n for n, _ in model.named_modules() if isinstance(_, nn.Linear)][-1]
+        for param in model.get_submodule(classifier_name).parameters():
+            param.requires_grad = True
+
+    optimizer = torch.optim.AdamW(get_param_groups(model, LR_HEAD, LR_BACKBONE), weight_decay=WEIGHT_DECAY)
     
     total_steps = total_epochs * iters_per_epoch
     def lr_lambda(step):
@@ -178,8 +198,8 @@ def main(args):
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
-            scheduler.step()
             optimizer.zero_grad()
+            scheduler.step()
             
             step = epoch * iters_per_epoch + i
             writer.add_scalar('Loss/train_step', loss.item(), step)
@@ -205,7 +225,7 @@ def main(args):
         p.requires_grad = True
     
     # Optimizer를 다시 만들어 모든 파라미터를 포함시킵니다.
-    optimizer = torch.optim.AdamW(param_groups(model), weight_decay=WEIGHT_DECAY)
+    optimizer = torch.optim.AdamW(get_param_groups(model, LR_HEAD, LR_BACKBONE), weight_decay=WEIGHT_DECAY)
     
     # 스케줄러도 새로 만들어 현재 step에 맞게 상태를 조정합니다.
     current_step = EPOCHS_STAGE1 * iters_per_epoch
@@ -224,8 +244,8 @@ def main(args):
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
-            scheduler.step()
             optimizer.zero_grad()
+            scheduler.step()
 
             step = epoch * iters_per_epoch + i
             writer.add_scalar('Loss/train_step', loss.item(), step)
@@ -258,6 +278,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train a hemoglobin prediction model.')
+    parser.add_argument('--model-name', type=str, default='swin_small_patch4_window7_224.ms_in22k', help='Name of the model to use from timm library')
     parser.add_argument('--img-size', type=int, default=384, help='Input image size')
     parser.add_argument('--batch-size', type=int, default=8, help='Batch size for training')
     parser.add_argument('--epochs-stage1', type=int, default=8, help='Number of epochs for stage 1 training')
@@ -265,7 +286,8 @@ if __name__ == '__main__':
     parser.add_argument('--lr-head', type=float, default=3e-4, help='Learning rate for the model head')
     parser.add_argument('--lr-backbone', type=float, default=3e-5, help='Learning rate for the model backbone')
     parser.add_argument('--weight-decay', type=float, default=5e-2, help='Weight decay for the optimizer')
-    parser.add_argument('--root-data-dir', type=str, default='seyun/Diff-Mix/real-data/', help='Root directory of the dataset')
+    parser.add_argument('--root-data-dir', type=str, default='una-001-output', help='Root directory of the dataset')
+    # C:\Users\parkj\Desktop\urp\augmentation\urp\seyun\una-001-output
     parser.add_argument('--accuracy-tolerance', type=float, default=1.0, help='Accuracy tolerance for evaluation')
     parser.add_argument('--num-workers', type=int, default=0, help='Number of workers for DataLoader')
     

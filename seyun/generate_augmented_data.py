@@ -51,7 +51,8 @@ def generate_images(args):
     # Load Conditioning MLP
     print(f"Loading Conditioning MLP from {os.path.join(args.model_dir, 'conditioning_mlp.pth')}")
     cond_mlp = ConditioningMLP(out_dim=unet.config.cross_attention_dim)
-    cond_mlp.load_state_dict(torch.load(os.path.join(args.model_dir, 'conditioning_mlp.pth'), map_location=device))
+    # FIX: Added weights_only=True to address security warning
+    cond_mlp.load_state_dict(torch.load(os.path.join(args.model_dir, 'conditioning_mlp.pth'), map_location=device, weights_only=True))
 
     # Move models to device
     vae.to(device)
@@ -120,11 +121,12 @@ def generate_images(args):
             # 5. Save images
             for i, img in enumerate(pil_images):
                 img_seed = np.random.randint(0, 100000) if args.seed is None else f"{args.seed}_{i}"
-                filename = f"hb_{{hb_value:.2f}}_sample_{{i}}_seed_{{img_seed}}.png"
+                # FIX: Corrected the f-string for the filename
+                filename = f"hb_{hb_value:.2f}_sample_{i}_seed_{img_seed}.png"
                 img.save(os.path.join(args.output_dir, filename))
                 print(f"Saved: {filename}")
 
-    print("\nGeneration finished.")
+    print("Generation finished.")
 
 # ----------------------------------
 # 3. Main Execution
