@@ -126,8 +126,7 @@ def generate_images(args):
                 img.save(os.path.join(args.output_dir, filename))
                 print(f"Saved: {filename}")
 
-    print("
-Generation finished.")
+    print("Generation finished.")
 
 # ----------------------------------
 # 3. Main Execution

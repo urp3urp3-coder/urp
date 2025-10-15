@@ -135,9 +135,9 @@ def main():
             block_id = int(name.split(".")[1])
             hidden_size = unet.config.block_out_channels[block_id]
 
-        elif name.startswith("down_blocks"):
-            block_id = int(name[len("down_blocks.")])
-            hidden_size = unet.config.block_out_channels[block_id]
+        # elif name.startswith("down_blocks"):
+        #     block_id = int(name[len("down_blocks.")])
+        #     hidden_size = unet.config.block_out_channels[block_id]
         
         lora_attn_procs[name] = LoRAAttnProcessor(
             hidden_size=hidden_size, 
