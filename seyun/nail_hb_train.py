@@ -137,17 +137,17 @@ def main(args):
 
     # Model
     print(f"Creating model: {args.model_name}")
-        model = timm.create_model(
-            args.model_name,
-            pretrained=True,
-            num_classes=1,
-        )
-    
-        if torch.cuda.device_count() > 1:
-            print(f"Activating DataParallel for {torch.cuda.device_count()} GPUs!")
-            model = nn.DataParallel(model)
-    
-        model = model.to(DEVICE)
+    model = timm.create_model(
+        args.model_name,
+        pretrained=True,
+        num_classes=1,
+    )
+
+    if torch.cuda.device_count() > 1:
+        print(f"Activating DataParallel for {torch.cuda.device_count()} GPUs!")
+        model = nn.DataParallel(model)
+
+    model = model.to(DEVICE)
     criterion = nn.SmoothL1Loss()
     scaler = torch.amp.GradScaler('cuda', enabled=(DEVICE=="cuda"))
     
